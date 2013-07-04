@@ -5,8 +5,8 @@ object BuildSettings
 {
 
 	val buildSettings = Defaults.defaultSettings ++ Seq(
-			organization := "w3d.cc",
-			version      := "0.0.1",
+			organization := "com.bryghts.scapledb",
+			version      := "0.0.1-SNAPSHOT",
 			scalaVersion := "2.10.1",
 			scalacOptions ++= Seq(),
 			libraryDependencies += "com.amazonaws" % "aws-java-sdk" % "1.4.7"
