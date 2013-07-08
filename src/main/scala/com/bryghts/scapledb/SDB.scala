@@ -18,11 +18,14 @@ import com.amazonaws.services.simpledb.model.BatchPutAttributesRequest
 import com.amazonaws.services.simpledb.model.DomainMetadataRequest
 import java.util.Date
 import com.amazonaws.services.simpledb.model.NoSuchDomainException
-
-
+import com.bryghts.scapledb.providers.StartGenericProvider
+import scala.collection.JavaConversions._
+import com.amazonaws.services.simpledb.model.{Item => AWSItem}
+import com.bryghts.scapledb.results.FutureResult
 
 class SDB private(core: SDBCore)
 {
+	import SDB._
 
 	/**
 	 * Returns information about the domain, including when the domain was
@@ -53,10 +56,88 @@ class SDB private(core: SDBCore)
 							response.getItemNamesSizeBytes(),
 							new Date(response
 										.getTimestamp()
-										.asInstanceOf[Long] * 1000l)))
+										.longValue() * 1000l)))
 				}
 				.recover {case e: NoSuchDomainException => None}
 
+
+	def listDomains (implicit ec: ExecutionContext) =
+		provider
+		{nextToken =>
+
+			core
+				.listDomains(
+					new ListDomainsRequest()
+							.withNextToken(nextToken.getOrElse(null)))
+				.map{result =>
+						(result.getDomainNames().toList, Option(result.getNextToken()))
+				}
+
+		}
+
+
+	def listDomains (paginationSize: Int)(implicit ec: ExecutionContext) =
+		provider
+		{nextToken =>
+
+			core
+				.listDomains(
+					new ListDomainsRequest()
+							.withMaxNumberOfDomains(paginationSize)
+							.withNextToken(nextToken.getOrElse(null)))
+				.map{result =>
+						(result.getDomainNames().toList, Option(result.getNextToken()))
+				}
+
+		}
+
+	def select(query: String, consistenRead: Boolean = false)(implicit ec: ExecutionContext) =
+		provider
+		{nextToken =>
+			core
+				.select(
+					new SelectRequest(query, consistenRead)
+							.withNextToken(nextToken.getOrElse(null)))
+				.map{result =>
+						(result.getItems().toList.map{item =>
+							Item(
+								item.getName(),
+								item.getAttributes().toList.groupBy(_.getName()).map{row =>
+									(row._1, row._2.map{_.getValue()})}
+							)
+				}, Option(result.getNextToken()))
+			}
+		}
+
+	def createDomain(name: String)(implicit ec: ExecutionContext) =
+		core.createDomain(new CreateDomainRequest(name))
+
+	def getItem(domain: String, item: String, consistentRead: Boolean = false)(implicit ec: ExecutionContext) =
+		core
+			.getAttributes(new GetAttributesRequest(domain, item).withConsistentRead(consistentRead))
+			.map{response =>
+					Item(
+							item,
+							response.getAttributes().toList.groupBy(_.getName()).map{row =>
+								(row._1, row._2.map{_.getValue()})
+							}
+					)
+			}
+
+	def getItemAttributes(domain: String, item: String, attributes: Traversable[String], consistentRead: Boolean = false)(implicit ec: ExecutionContext) =
+		core
+			.getAttributes(new GetAttributesRequest(domain, item).withConsistentRead(consistentRead).withAttributeNames(attributes.toList))
+			.map{response =>
+					response.getAttributes().toList.groupBy(_.getName()).map{row =>
+						(row._1, row._2.map{_.getValue()})
+					}
+			}
+
+	def getItemAttributes(domain: String, item: String, consistentRead: Boolean)(attributes: String*)(implicit ec: ExecutionContext):Future[Map[String, List[String]]] =
+			getItemAttributes(domain, item, attributes.toList, consistentRead)(ec)
+
+	def getItemAttributes(domain: String, item: String)(attributes: String*)(implicit ec: ExecutionContext):Future[Map[String, List[String]]] =
+			getItemAttributes(domain, item, attributes.toList, false)(ec)
 
 }
 
@@ -83,6 +164,11 @@ case class DomainMetadata(
 	/** The data and time when metadata was calculated. In UTC */
 	timestamp: Date
 
+)
+
+case class Item(
+		name: String,
+		attributes: Map[String, List[String]]
 )
 
 class SDBCore private(client: AmazonSimpleDB)
@@ -148,3 +234,30 @@ object SDBCore
 
 }
 
+
+
+
+object SDB
+{
+
+	def apply() =
+		new SDB(SDBCore())
+
+	def apply(awsCredentials: AWSCredentials) =
+		new SDB(SDBCore(awsCredentials))
+
+	def apply(awsCredentials: AWSCredentials, clientConfiguration: ClientConfiguration) =
+		new SDB(SDBCore(awsCredentials, clientConfiguration))
+
+	def apply(awsCredentialsProvider: AWSCredentialsProvider) =
+		new SDB(SDBCore(awsCredentialsProvider))
+
+	def apply(awsCredentialsProvider: AWSCredentialsProvider, clientConfiguration: ClientConfiguration) =
+		new SDB(SDBCore(awsCredentialsProvider, clientConfiguration))
+
+	def apply(clientConfiguration: ClientConfiguration) =
+		new SDB(SDBCore(clientConfiguration))
+
+	private def provider[A](f: Option[String] => Future[(List[A], Option[String])])(implicit ec: ExecutionContext) =
+		FutureResult(new StartGenericProvider(f))
+}
