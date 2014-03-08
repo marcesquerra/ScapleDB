@@ -18,10 +18,13 @@ import com.amazonaws.services.simpledb.model.BatchPutAttributesRequest
 import com.amazonaws.services.simpledb.model.DomainMetadataRequest
 import java.util.Date
 import com.amazonaws.services.simpledb.model.NoSuchDomainException
-import com.bryghts.scapledb.providers.StartGenericProvider
 import scala.collection.JavaConversions._
 import com.amazonaws.services.simpledb.model.{Item => AWSItem}
-import com.bryghts.scapledb.results.FutureResult
+import com.bryghts.scapledb.profecy.Prophecy
+import com.bryghts.scapledb.profecy.BucketedProphet.Bucket
+import com.bryghts.scapledb.profecy.BucketedProphet.BucketProvider
+import com.bryghts.scapledb.profecy.BucketedProphet
+
 
 class SDB private(core: SDBCore)
 {
@@ -70,7 +73,7 @@ class SDB private(core: SDBCore)
 					new ListDomainsRequest()
 							.withNextToken(nextToken.getOrElse(null)))
 				.map{result =>
-						(result.getDomainNames().toList, Option(result.getNextToken()))
+						Bucket(result.getDomainNames().toList, Option(result.getNextToken()))
 				}
 
 		}
@@ -86,7 +89,7 @@ class SDB private(core: SDBCore)
 							.withMaxNumberOfDomains(paginationSize)
 							.withNextToken(nextToken.getOrElse(null)))
 				.map{result =>
-						(result.getDomainNames().toList, Option(result.getNextToken()))
+						Bucket(result.getDomainNames().toList, Option(result.getNextToken()))
 				}
 
 		}
@@ -99,7 +102,7 @@ class SDB private(core: SDBCore)
 					new SelectRequest(query, consistenRead)
 							.withNextToken(nextToken.getOrElse(null)))
 				.map{result =>
-						(result.getItems().toList.map{item =>
+						Bucket(result.getItems().toList.map{item =>
 							Item(
 								item.getName(),
 								item.getAttributes().toList.groupBy(_.getName()).map{row =>
@@ -258,6 +261,6 @@ object SDB
 	def apply(clientConfiguration: ClientConfiguration) =
 		new SDB(SDBCore(clientConfiguration))
 
-	private def provider[A](f: Option[String] => Future[(List[A], Option[String])])(implicit ec: ExecutionContext) =
-		FutureResult(new StartGenericProvider(f))
+	private def provider[A](f: BucketProvider[A, String])(implicit ec: ExecutionContext) =
+		Prophecy(BucketedProphet(f))
 }
